@@ -1,0 +1,13 @@
+{
+  "systems": [
+    {
+      "name": "test-skill",
+      "type": "skill",
+      "path": "/tmp/test-skill",
+      "notify_method": "auto",
+      "registered_at": "2026-04-07T16:55:35Z",
+      "status": "active"
+    }
+  ],
+  "updated_at": ""
+}

@@ -1,0 +1,381 @@
+#!/bin/bash
+# Feishu Relay 主动注册中心
+# 新系统、配置、网站等主动注册使用 feishu-relay
+
+FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
+REGISTRY_FILE="$FEISHU_NOTIFIER_DIR/registry/systems.json"
+
+# 初始化注册表
+init_registry() {
+    mkdir -p "$FEISHU_NOTIFIER_DIR/registry"
+    if [ ! -f "$REGISTRY_FILE" ]; then
+        echo '{"systems":[],"updated_at":""}' > "$REGISTRY_FILE"
+    fi
+}
+
+# 注册新系统
+register_system() {
+    local name="$1"
+    local type="$2"  # skill, website, service, script, cron
+    local path="$3"
+    local notify_method="${4:-auto}"  # auto, direct, queue, webhook
+    
+    init_registry
+    
+    # 检查是否已注册
+    if grep -q "\"name\":\"$name\"" "$REGISTRY_FILE" 2>/dev/null; then
+        echo "⚠️ 系统 '$name' 已注册，更新配置..."
+        # 删除旧记录
+        tmp_file=$(mktemp)
+        jq --arg name "$name" '.systems = [.systems[] | select(.name != $name)]' "$REGISTRY_FILE" > "$tmp_file"
+        mv "$tmp_file" "$REGISTRY_FILE"
+    fi
+    
+    # 添加新记录
+    tmp_file=$(mktemp)
+    jq --arg name "$name" \
+       --arg type "$type" \
+       --arg path "$path" \
+       --arg method "$notify_method" \
+       --arg time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       '.systems += [{"name":$name,"type":$type,"path":$path,"notify_method":$method,"registered_at":$time,"status":"active"}]' \
+       "$REGISTRY_FILE" > "$tmp_file"
+    mv "$tmp_file" "$REGISTRY_FILE"
+    
+    echo "✓ 系统 '$name' 已注册到 feishu-relay"
+    
+    # 根据类型创建对应的通知方式
+    case "$type" in
+        skill)
+            setup_skill "$name" "$path" "$notify_method"
+            ;;
+        website|web)
+            setup_website "$name" "$path" "$notify_method"
+            ;;
+        service|systemd)
+            setup_service "$name" "$path" "$notify_method"
+            ;;
+        script)
+            setup_script "$name" "$path" "$notify_method"
+            ;;
+        cron)
+            setup_cron "$name" "$path" "$notify_method"
+            ;;
+    esac
+}
+
+# 配置 skill 通知
+setup_skill() {
+    local name="$1"
+    local path="$2"
+    local method="$3"
+    
+    # 创建 notify 脚本
+    cat > "$path/notify" << EOF
+#!/bin/bash
+# $name 的通知脚本（自动注册生成）
+/opt/feishu-notifier/bin/notify "[$name] \${1:-通知}" "\${2:-}"
+EOF
+    chmod +x "$path/notify"
+    
+    echo "  ✓ 创建 $path/notify"
+}
+
+# 配置网站通知
+setup_website() {
+    local name="$1"
+    local path="$2"
+    local method="$3"
+    
+    # 创建 webhook 接收端点
+    webhook_script="$FEISHU_NOTIFIER_DIR/webhooks/${name}.sh"
+    mkdir -p "$FEISHU_NOTIFIER_DIR/webhooks"
+    
+    cat > "$webhook_script" << EOF
+#!/bin/bash
+# $name 的 webhook 通知脚本
+# 用法: curl -X POST http://localhost:8080/webhook/$name -d '{"title":"","content":""}'
+
+/opt/feishu-notifier/bin/notify "[$name] \${1:-网站通知}" "\${2:-}"
+EOF
+    chmod +x "$webhook_script"
+    
+    # 创建网站调用示例
+    cat > "$path/notify-integration.php" << 'EOF'
+<?php
+// 网站集成 feishu-relay 示例
+// 在需要发送通知的地方调用:
+
+function send_notification($title, $content) {
+    $cmd = '/opt/feishu-notifier/bin/notify "' . escapeshellarg($title) . '" "' . escapeshellarg($content) . '"';
+    shell_exec($cmd);
+}
+
+// 使用示例
+// send_notification("网站提醒", "新用户注册");
+?>
+EOF
+    
+    echo "  ✓ 创建 webhook: $webhook_script"
+    echo "  ✓ 创建 PHP 集成示例: $path/notify-integration.php"
+}
+
+# 配置服务通知
+setup_service() {
+    local name="$1"
+    local path="$2"
+    local method="$3"
+    
+    # 创建服务通知脚本
+    notify_script="$FEISHU_NOTIFIER_DIR/services/${name}-notify.sh"
+    mkdir -p "$FEISHU_NOTIFIER_DIR/services"
+    
+    cat > "$notify_script" << EOF
+#!/bin/bash
+# $name 服务通知脚本
+
+/opt/feishu-notifier/bin/notify "[Service:$name] \${1:-状态变更}" "\${2:-}"
+EOF
+    chmod +x "$notify_script"
+    
+    echo "  ✓ 创建服务通知脚本: $notify_script"
+    echo "  在服务中调用: $notify_script '标题' '内容'"
+}
+
+# 配置脚本通知
+setup_script() {
+    local name="$1"
+    local path="$2"
+    local method="$3"
+    
+    # 在脚本开头添加通知函数
+    if [ -f "$path" ]; then
+        # 备份原脚本
+        cp "$path" "$path.backup.$(date +%s)"
+        
+        # 创建新脚本，添加通知函数
+        tmp_file=$(mktemp)
+        cat > "$tmp_file" << 'EOF'
+#!/bin/bash
+# 自动注入的 feishu-relay 通知函数
+notify() {
+    /opt/feishu-notifier/bin/notify "${1:-通知}" "${2:-}"
+}
+export -f notify
+
+EOF
+        # 追加原脚本内容（去掉 shebang）
+        tail -n +2 "$path" >> "$tmp_file"
+        mv "$tmp_file" "$path"
+        chmod +x "$path"
+        
+        echo "  ✓ 注入通知函数到: $path"
+    fi
+}
+
+# 配置 cron 通知
+setup_cron() {
+    local name="$1"
+    local path="$2"
+    local method="$3"
+    
+    # 创建 cron 包装脚本
+    wrapper="$FEISHU_NOTIFIER_DIR/cron-wrappers/${name}.sh"
+    mkdir -p "$FEISHU_NOTIFIER_DIR/cron-wrappers"
+    
+    cat > "$wrapper" << EOF
+#!/bin/bash
+# $name 的 cron 包装脚本
+
+# 执行原命令
+$path
+
+# 发送完成通知
+/opt/feishu-notifier/bin/notify "[Cron:$name]" "任务执行完成"
+EOF
+    chmod +x "$wrapper"
+    
+    echo "  ✓ 创建 cron 包装: $wrapper"
+    echo "  修改 crontab 使用: $wrapper"
+}
+
+# 列出所有注册的系统
+list_systems() {
+    init_registry
+    
+    echo "=== 已注册的系统 ==="
+    jq -r '.systems[] | "\(.name) [\(.type)] - \(.status) - \(.registered_at)"' "$REGISTRY_FILE" 2>/dev/null | column -t
+    
+    echo ""
+    echo "统计:"
+    jq '.systems | group_by(.type) | map({type: .[0].type, count: length})' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# 注销系统
+unregister_system() {
+    local name="$1"
+    
+    init_registry
+    
+    tmp_file=$(mktemp)
+    jq --arg name "$name" '.systems = [.systems[] | select(.name != $name)]' "$REGISTRY_FILE" > "$tmp_file"
+    mv "$tmp_file" "$REGISTRY_FILE"
+    
+    echo "✓ 系统 '$name' 已注销"
+}
+
+# 生成集成 SDK
+generate_sdk() {
+    local lang="$1"
+    
+    sdk_dir="$FEISHU_NOTIFIER_DIR/sdk/$lang"
+    mkdir -p "$sdk_dir"
+    
+    case "$lang" in
+        bash|shell)
+            cat > "$sdk_dir/notify.sh" << 'EOF'
+#!/bin/bash
+# Feishu Relay SDK for Bash
+# 用法: source /opt/feishu-notifier/sdk/bash/notify.sh
+
+FEISHU_NOTIFY_CMD="/opt/feishu-notifier/bin/notify"
+
+notify() {
+    local title="${1:-通知}"
+    local content="${2:-}"
+    "$FEISHU_NOTIFY_CMD" "$title" "$content"
+}
+
+notify_later() {
+    local minutes="$1"
+    shift
+    local title="$1"
+    shift
+    local content="$*"
+    /opt/feishu-notifier/bin/feishu-task-v2 in "$minutes" "$title" "$content"
+}
+
+export -f notify notify_later
+EOF
+            echo "✓ 生成 Bash SDK: $sdk_dir/notify.sh"
+            ;;
+            
+        python|py)
+            cat > "$sdk_dir/notify.py" << 'EOF'
+#!/usr/bin/env python3
+"""Feishu Relay SDK for Python"""
+import subprocess
+import os
+
+FEISHU_NOTIFY_CMD = "/opt/feishu-notifier/bin/notify"
+FEISHU_TASK_CMD = "/opt/feishu-notifier/bin/feishu-task-v2"
+
+def notify(title="通知", content=""):
+    """发送立即通知"""
+    subprocess.run([FEISHU_NOTIFY_CMD, title, content], check=False)
+
+def notify_later(minutes, title, content=""):
+    """发送定时通知"""
+    subprocess.run([FEISHU_TASK_CMD, "in", str(minutes), title, content], check=False)
+
+if __name__ == "__main__":
+    notify("测试", "Python SDK 工作正常")
+EOF
+            echo "✓ 生成 Python SDK: $sdk_dir/notify.py"
+            ;;
+            
+        php)
+            cat > "$sdk_dir/notify.php" << 'EOF'
+<?php
+/** Feishu Relay SDK for PHP */
+
+class FeishuRelay {
+    const NOTIFY_CMD = "/opt/feishu-notifier/bin/notify";
+    const TASK_CMD = "/opt/feishu-notifier/bin/feishu-task-v2";
+    
+    public static function notify($title = "通知", $content = "") {
+        $cmd = self::NOTIFY_CMD . " " . escapeshellarg($title) . " " . escapeshellarg($content);
+        shell_exec($cmd);
+    }
+    
+    public static function notifyLater($minutes, $title, $content = "") {
+        $cmd = self::TASK_CMD . " in " . intval($minutes) . " " . escapeshellarg($title) . " " . escapeshellarg($content);
+        shell_exec($cmd);
+    }
+}
+
+// 使用示例
+// FeishuRelay::notify("网站提醒", "新订单");
+?>
+EOF
+            echo "✓ 生成 PHP SDK: $sdk_dir/notify.php"
+            ;;
+            
+        *)
+            echo "不支持的 SDK 语言: $lang"
+            echo "支持: bash, python, php"
+            ;;
+    esac
+}
+
+# 帮助
+help() {
+    cat << 'EOF'
+用法: feishu-relay-register <命令> [参数]
+
+命令:
+  register <name> <type> <path> [method]  注册新系统
+  unregister <name>                        注销系统
+  list                                      列出所有注册系统
+  sdk <language>                            生成 SDK (bash/python/php)
+
+类型:
+  skill      - OpenClaw skill
+  website    - 网站/Web应用
+  service    - systemd 服务
+  script     - 脚本文件
+  cron       - cron 定时任务
+
+示例:
+  # 注册新网站
+  feishu-relay-register register myapp website /var/www/myapp
+
+  # 注册新服务
+  feishu-relay-register register myservice service /opt/myservice
+
+  # 生成 Python SDK
+  feishu-relay-register sdk python
+
+  # 列出所有注册系统
+  feishu-relay-register list
+
+EOF
+}
+
+# 主程序
+main() {
+    case "$1" in
+        register)
+            [ -z "$2" ] && { echo "错误: 缺少系统名称"; help; exit 1; }
+            [ -z "$3" ] && { echo "错误: 缺少系统类型"; help; exit 1; }
+            [ -z "$4" ] && { echo "错误: 缺少系统路径"; help; exit 1; }
+            register_system "$2" "$3" "$4" "${5:-auto}"
+            ;;
+        unregister)
+            [ -z "$2" ] && { echo "错误: 缺少系统名称"; exit 1; }
+            unregister_system "$2"
+            ;;
+        list)
+            list_systems
+            ;;
+        sdk)
+            [ -z "$2" ] && { echo "错误: 缺少语言"; help; exit 1; }
+            generate_sdk "$2"
+            ;;
+        *)
+            help
+            ;;
+    esac
+}
+
+main "$@"
