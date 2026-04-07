@@ -41,13 +41,15 @@ def process_one():
     cursor = conn.cursor()
     
     # 取一条待处理消息（execute_at 为 NULL 或已到时间）
+    # 使用本地时间比较
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute("""
         SELECT id, title, content, retry, execute_at 
         FROM queue 
-        WHERE execute_at IS NULL OR execute_at <= datetime('now')
+        WHERE execute_at IS NULL OR execute_at <= ?
         ORDER BY execute_at NULLS LAST, created_at 
         LIMIT 1
-    """)
+    """, (now_str,))
     row = cursor.fetchone()
     
     if not row:
@@ -55,11 +57,6 @@ def process_one():
         return False
     
     msg_id, title, content, retry, execute_at = row
-    
-    # 如果设置了执行时间但还没到，不处理
-    if execute_at and execute_at > datetime.now().strftime('%Y-%m-%d %H:%M:%S'):
-        conn.close()
-        return False
     
     try:
         # 加载环境变量
