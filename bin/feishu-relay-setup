@@ -1,0 +1,139 @@
+#!/bin/bash
+# Feishu Relay 自动接入脚本
+# 为新安装的 skill 自动配置通知通道
+# 用法: feishu-relay-setup <skill-name> [通知类型]
+
+SKILL_NAME="$1"
+NOTIFY_TYPE="${2:-auto}"  # auto, direct, queue, cron
+FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
+
+if [ -z "$SKILL_NAME" ]; then
+    echo "用法: feishu-relay-setup <skill-name> [通知类型]"
+    echo "  通知类型: auto(自动), direct(直接发送), queue(队列), cron(定时)"
+    exit 1
+fi
+
+echo "=== Feishu Relay 自动接入 ==="
+echo "Skill: $SKILL_NAME"
+echo "通知类型: $NOTIFY_TYPE"
+echo ""
+
+# 检查 skill 是否存在
+SKILL_DIR=""
+for dir in /opt/openclaw/skills/*/$SKILL_NAME \
+           /opt/openclaw/skills/$SKILL_NAME \
+           ~/.openclaw/skills/*/$SKILL_NAME \
+           ~/.openclaw/skills/$SKILL_NAME; do
+    if [ -d "$dir" ]; then
+        SKILL_DIR="$dir"
+        break
+    fi
+done
+
+if [ -z "$SKILL_DIR" ]; then
+    echo "⚠️ 警告: 未找到 skill 目录: $SKILL_NAME"
+    echo "请确认 skill 已安装，或手动指定路径"
+    read -p "是否手动输入路径? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        read -p "Skill 路径: " SKILL_DIR
+    else
+        exit 1
+    fi
+fi
+
+echo "✓ 找到 skill 目录: $SKILL_DIR"
+
+# 创建通知包装脚本
+WRAPPER_SCRIPT="$FEISHU_NOTIFIER_DIR/wrappers/${SKILL_NAME}-notify.sh"
+mkdir -p "$FEISHU_NOTIFIER_DIR/wrappers"
+
+cat > "$WRAPPER_SCRIPT" << EOF
+#!/bin/bash
+# $SKILL_NAME 的通知包装脚本（自动生成）
+# 由 feishu-relay-setup 创建
+
+# 默认直接发送
+/opt/feishu-notifier/bin/notify "\${1:-$SKILL_NAME}" "\${2:-通知内容}"
+EOF
+
+chmod +x "$WRAPPER_SCRIPT"
+ln -sf "$WRAPPER_SCRIPT" "/usr/local/bin/${SKILL_NAME}-notify" 2>/dev/null || true
+
+echo "✓ 创建通知包装脚本: $WRAPPER_SCRIPT"
+
+# 根据通知类型创建不同的集成方案
+case "$NOTIFY_TYPE" in
+    direct)
+        # 直接发送 - 最简单
+        echo ""
+        echo "=== 集成方案: 直接发送 ==="
+        echo "在 $SKILL_NAME 中使用:"
+        echo "  /opt/feishu-notifier/bin/notify \"标题\" \"内容\""
+        echo ""
+        echo "或简写:"
+        echo "  notify \"标题\" \"内容\""
+        ;;
+        
+    queue|auto)
+        # 队列方式 - 推荐
+        echo ""
+        echo "=== 集成方案: 队列方式（推荐）==="
+        echo "在 $SKILL_NAME 中使用:"
+        echo "  /opt/feishu-notifier/bin/feishu-task-v2 now \"标题\" \"内容\""
+        echo ""
+        echo "或定时发送:"
+        echo "  /opt/feishu-notifier/bin/feishu-task-v2 in 30 \"30分钟后提醒\""
+        ;;
+        
+    cron)
+        # 定时任务
+        echo ""
+        echo "=== 集成方案: 系统定时任务 ==="
+        echo "添加到 crontab:"
+        echo "  crontab -e"
+        echo "  */5 * * * * /opt/feishu-notifier/bin/notify \"$SKILL_NAME\" \"定时报告\""
+        ;;
+esac
+
+# 创建示例代码
+EXAMPLE_FILE="$SKILL_DIR/.feishu-relay-example"
+cat > "$EXAMPLE_FILE" << 'EOF'
+# Feishu Relay 集成示例
+# 由 feishu-relay-setup 自动生成
+
+## Bash 脚本中使用
+/opt/feishu-notifier/bin/notify "标题" "内容"
+
+## Python 脚本中使用
+import subprocess
+subprocess.run([
+    "/opt/feishu-notifier/bin/notify",
+    "-t", "标题",
+    "-m", "内容"
+])
+
+## 定时任务
+/opt/feishu-notifier/bin/feishu-task-v2 in 30 "30分钟后提醒"
+
+## 直接写入队列（高级）
+import sqlite3
+conn = sqlite3.connect("/opt/feishu-notifier/queue/notify-queue.db")
+conn.execute("INSERT INTO queue(title, content) VALUES (?, ?)", ("标题", "内容"))
+conn.commit()
+conn.close()
+EOF
+
+echo ""
+echo "✓ 创建示例文件: $EXAMPLE_FILE"
+echo ""
+echo "=== 接入完成 ==="
+echo "Skill '$SKILL_NAME' 已配置使用 feishu-relay 发送通知"
+echo ""
+echo "提示:"
+echo "  1. 在 skill 代码中调用上述命令发送通知"
+echo "  2. 无需修改 feishu-relay 本身"
+echo "  3. 所有通知统一通过 feishu-relay 队列处理"
+echo ""
+echo "测试命令:"
+echo "  /opt/feishu-notifier/bin/notify \"$SKILL_NAME测试\" \"接入成功\""
