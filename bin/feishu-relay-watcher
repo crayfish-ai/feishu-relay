@@ -1,0 +1,285 @@
+#!/bin/bash
+# Feishu Relay 自动检测和注册守护进程
+# 持续监控系统变化，自动注册新部署的系统
+
+FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
+WATCH_DIRS=(
+    "/opt/openclaw/skills"
+    "/var/www"
+    "/opt"
+    "/data"
+)
+SCAN_INTERVAL=300  # 5分钟扫描一次
+PID_FILE="/var/run/feishu-relay-watcher.pid"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$FEISHU_NOTIFIER_DIR/logs/watcher.log"
+}
+
+# 检测新部署的 skill
+detect_new_skills() {
+    local base_dir="$1"
+    [ -d "$base_dir" ] || return
+    
+    for skill_dir in "$base_dir"/*; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name=$(basename "$skill_dir")
+        
+        # 检查是否已注册
+        if [ ! -f "$skill_dir/.feishu-registered" ]; then
+            log "发现新 skill: $skill_name"
+            
+            # 自动注册
+            register_skill "$skill_name" "$skill_dir"
+            
+            # 标记已注册
+            touch "$skill_dir/.feishu-registered"
+            echo "registered_at=$(date -Iseconds)" > "$skill_dir/.feishu-registered"
+        fi
+    done
+}
+
+# 检测新部署的网站
+detect_new_websites() {
+    local base_dir="$1"
+    [ -d "$base_dir" ] || return
+    
+    for site_dir in "$base_dir"/*; do
+        [ -d "$site_dir" ] || continue
+        local site_name=$(basename "$site_dir")
+        
+        # 检查是否是网站（有 index.php 或 index.html）
+        [ -f "$site_dir/index.php" ] || [ -f "$site_dir/index.html" ] || continue
+        
+        # 检查是否已注册
+        if [ ! -f "$site_dir/.feishu-registered" ]; then
+            log "发现新网站: $site_name"
+            
+            # 自动注册
+            register_website "$site_name" "$site_dir"
+            
+            # 标记已注册
+            touch "$site_dir/.feishu-registered"
+            echo "registered_at=$(date -Iseconds)" > "$site_dir/.feishu-registered"
+        fi
+    done
+}
+
+# 检测新部署的服务
+detect_new_services() {
+    # 检查 /opt 下的新服务目录
+    for service_dir in /opt/*; do
+        [ -d "$service_dir" ] || continue
+        local service_name=$(basename "$service_dir")
+        
+        # 检查是否有服务特征（有 start.sh 或 systemd 服务文件）
+        [ -f "$service_dir/start.sh" ] || [ -f "/etc/systemd/system/${service_name}.service" ] || continue
+        
+        # 检查是否已注册
+        if [ ! -f "$service_dir/.feishu-registered" ]; then
+            log "发现新服务: $service_name"
+            
+            # 自动注册
+            register_service "$service_name" "$service_dir"
+            
+            # 标记已注册
+            touch "$service_dir/.feishu-registered"
+            echo "registered_at=$(date -Iseconds)" > "$service_dir/.feishu-registered"
+        fi
+    done
+}
+
+# 注册 skill
+register_skill() {
+    local name="$1"
+    local path="$2"
+    
+    # 创建 notify 脚本
+    cat > "$path/notify" << EOF
+#!/bin/bash
+# $name 的通知脚本（自动生成）
+/opt/feishu-notifier/bin/notify "[$name] \${1:-通知}" "\${2:-}"
+EOF
+    chmod +x "$path/notify"
+    
+    # 添加到注册表
+    /opt/feishu-notifier/bin/feishu-relay-register register "$name" skill "$path" auto 2>/dev/null || true
+    
+    # 发送通知
+    /opt/feishu-notifier/bin/notify "🔧 自动注册" "新 skill '$name' 已自动接入 feishu-relay"
+    
+    log "✓ Skill '$name' 自动注册完成"
+}
+
+# 注册网站
+register_website() {
+    local name="$1"
+    local path="$2"
+    
+    # 创建 PHP 集成文件
+    cat > "$path/feishu-notify.php" << 'EOF'
+<?php
+/**
+ * Feishu Relay 自动集成
+ * 用法: require_once 'feishu-notify.php';
+ *       FeishuNotify::send("标题", "内容");
+ */
+class FeishuNotify {
+    public static function send($title, $content = "") {
+        $cmd = '/opt/feishu-notifier/bin/notify ' . 
+               escapeshellarg($title) . ' ' . 
+               escapeshellarg($content);
+        shell_exec($cmd);
+    }
+    
+    public static function sendLater($minutes, $title, $content = "") {
+        $cmd = '/opt/feishu-notifier/bin/feishu-task-v2 in ' . 
+               intval($minutes) . ' ' .
+               escapeshellarg($title) . ' ' . 
+               escapeshellarg($content);
+        shell_exec($cmd);
+    }
+}
+EOF
+    
+    # 创建使用示例
+    cat > "$path/feishu-notify-example.php" << 'EOF'
+<?php
+require_once 'feishu-notify.php';
+
+// 发送通知示例
+FeishuNotify::send("网站事件", "用户注册了账号");
+
+// 定时通知示例
+FeishuNotify::sendLater(30, "提醒", "30分钟后的任务");
+?>
+EOF
+    
+    # 添加到注册表
+    /opt/feishu-notifier/bin/feishu-relay-register register "$name" website "$path" auto 2>/dev/null || true
+    
+    # 发送通知
+    /opt/feishu-notifier/bin/notify "🌐 自动注册" "新网站 '$name' 已自动接入 feishu-relay"
+    
+    log "✓ 网站 '$name' 自动注册完成"
+}
+
+# 注册服务
+register_service() {
+    local name="$1"
+    local path="$2"
+    
+    # 创建服务通知脚本
+    cat > "$path/notify.sh" << EOF
+#!/bin/bash
+# $name 服务通知脚本（自动生成）
+/opt/feishu-notifier/bin/notify "[Service:$name] \${1:-状态变更}" "\${2:-}"
+EOF
+    chmod +x "$path/notify.sh"
+    
+    # 添加到注册表
+    /opt/feishu-notifier/bin/feishu-relay-register register "$name" service "$path" auto 2>/dev/null || true
+    
+    # 发送通知
+    /opt/feishu-notifier/bin/notify "⚙️ 自动注册" "新服务 '$name' 已自动接入 feishu-relay"
+    
+    log "✓ 服务 '$name' 自动注册完成"
+}
+
+# 扫描所有目录
+scan_all() {
+    log "=== 开始扫描 ==="
+    
+    for dir in "${WATCH_DIRS[@]}"; do
+        [ -d "$dir" ] || continue
+        
+        detect_new_skills "$dir"
+        detect_new_websites "$dir"
+    done
+    
+    detect_new_services
+    
+    log "=== 扫描完成 ==="
+}
+
+# 主循环
+main_loop() {
+    log "🚀 Feishu Relay 自动检测守护进程启动"
+    
+    while true; do
+        scan_all
+        sleep $SCAN_INTERVAL
+    done
+}
+
+# 启动守护进程
+start_daemon() {
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo "守护进程已在运行 (PID: $(cat $PID_FILE))"
+        exit 1
+    fi
+    
+    mkdir -p "$FEISHU_NOTIFIER_DIR/logs"
+    main_loop &
+    echo $! > "$PID_FILE"
+    echo "守护进程已启动 (PID: $(cat $PID_FILE))"
+}
+
+# 停止守护进程
+stop_daemon() {
+    if [ -f "$PID_FILE" ]; then
+        kill $(cat "$PID_FILE") 2>/dev/null
+        rm -f "$PID_FILE"
+        echo "守护进程已停止"
+    else
+        echo "守护进程未运行"
+    fi
+}
+
+# 状态检查
+status_daemon() {
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo "守护进程运行中 (PID: $(cat $PID_FILE))"
+        echo "最近日志:"
+        tail -5 "$FEISHU_NOTIFIER_DIR/logs/watcher.log" 2>/dev/null || echo "暂无日志"
+    else
+        echo "守护进程未运行"
+    fi
+}
+
+# 帮助
+help() {
+    cat << 'EOF'
+用法: feishu-relay-watcher <命令>
+
+命令:
+  start    启动自动检测守护进程
+  stop     停止守护进程
+  status   查看状态
+  scan     立即执行一次扫描
+
+说明:
+  守护进程每 5 分钟自动扫描一次，发现新部署的系统并自动注册。
+  无需手动输入命令，系统自动完成注册。
+
+EOF
+}
+
+# 主程序
+case "$1" in
+    start)
+        start_daemon
+        ;;
+    stop)
+        stop_daemon
+        ;;
+    status)
+        status_daemon
+        ;;
+    scan)
+        scan_all
+        ;;
+    *)
+        help
+        ;;
+esac

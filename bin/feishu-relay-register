@@ -1,379 +1,305 @@
 #!/bin/bash
-# Feishu Relay 主动注册中心
-# 新系统、配置、网站等主动注册使用 feishu-relay
+#
+# feishu-relay-register - 手动注册/注销系统到 Feishu Relay
+# 用法: feishu-relay-register [register|unregister|list|status] [name] [type] [path]
+#
 
-FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
-REGISTRY_FILE="$FEISHU_NOTIFIER_DIR/registry/systems.json"
+set -e
 
-# 初始化注册表
+REGISTRY_FILE="/opt/feishu-notifier/registry/systems.json"
+NOTIFY_BIN="/opt/feishu-notifier/bin/notify"
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 确保注册表文件存在
 init_registry() {
-    mkdir -p "$FEISHU_NOTIFIER_DIR/registry"
-    if [ ! -f "$REGISTRY_FILE" ]; then
-        echo '{"systems":[],"updated_at":""}' > "$REGISTRY_FILE"
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        mkdir -p "$(dirname "$REGISTRY_FILE")"
+        echo '{"systems": [], "updated_at": ""}' > "$REGISTRY_FILE"
+        log_info "Created new registry file"
     fi
 }
 
-# 注册新系统
-register_system() {
+# 生成系统 ID
+generate_id() {
+    echo -n "$1" | md5sum | cut -c1-8
+}
+
+# 注册系统
+cmd_register() {
     local name="$1"
-    local type="$2"  # skill, website, service, script, cron
-    local path="$3"
-    local notify_method="${4:-auto}"  # auto, direct, queue, webhook
+    local type="${2:-service}"
+    local path="${3:-$(pwd)}"
+    
+    if [[ -z "$name" ]]; then
+        log_error "Usage: feishu-relay-register register <name> [type] [path]"
+        log_info "Types: website, service, skill, task, data"
+        exit 1
+    fi
+    
+    # 标准化路径
+    path="$(realpath "$path" 2>/dev/null || echo "$path")"
     
     init_registry
     
-    # 检查是否已注册
-    if grep -q "\"name\":\"$name\"" "$REGISTRY_FILE" 2>/dev/null; then
-        echo "⚠️ 系统 '$name' 已注册，更新配置..."
+    # 检查是否已存在
+    if jq -e ".systems[] | select(.name == \"$name\")" "$REGISTRY_FILE" &>/dev/null; then
+        log_warn "System '$name' already registered, updating..."
         # 删除旧记录
-        tmp_file=$(mktemp)
-        jq --arg name "$name" '.systems = [.systems[] | select(.name != $name)]' "$REGISTRY_FILE" > "$tmp_file"
-        mv "$tmp_file" "$REGISTRY_FILE"
+        jq "del(.systems[] | select(.name == \"$name\"))" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+        mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
     fi
     
     # 添加新记录
-    tmp_file=$(mktemp)
-    jq --arg name "$name" \
-       --arg type "$type" \
-       --arg path "$path" \
-       --arg method "$notify_method" \
-       --arg time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '.systems += [{"name":$name,"type":$type,"path":$path,"notify_method":$method,"registered_at":$time,"status":"active"}]' \
-       "$REGISTRY_FILE" > "$tmp_file"
-    mv "$tmp_file" "$REGISTRY_FILE"
+    local id=$(generate_id "$path")
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
-    echo "✓ 系统 '$name' 已注册到 feishu-relay"
+    jq ".systems += [{
+        \"id\": \"$id\",
+        \"name\": \"$name\",
+        \"type\": \"$type\",
+        \"path\": \"$path\",
+        \"notify_method\": \"auto\",
+        \"registered_at\": \"$timestamp\",
+        \"status\": \"active\",
+        \"auto_discovered\": false
+    }] | .updated_at = \"$timestamp\"" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+    mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
     
-    # 根据类型创建对应的通知方式
-    case "$type" in
-        skill)
-            setup_skill "$name" "$path" "$notify_method"
-            ;;
-        website|web)
-            setup_website "$name" "$path" "$notify_method"
-            ;;
-        service|systemd)
-            setup_service "$name" "$path" "$notify_method"
-            ;;
-        script)
-            setup_script "$name" "$path" "$notify_method"
-            ;;
-        cron)
-            setup_cron "$name" "$path" "$notify_method"
-            ;;
-    esac
-}
-
-# 配置 skill 通知
-setup_skill() {
-    local name="$1"
-    local path="$2"
-    local method="$3"
+    log_success "Registered: $name ($type)"
+    log_info "Path: $path"
     
-    # 创建 notify 脚本
-    cat > "$path/notify" << EOF
-#!/bin/bash
-# $name 的通知脚本（自动注册生成）
-/opt/feishu-notifier/bin/notify "[$name] \${1:-通知}" "\${2:-}"
-EOF
-    chmod +x "$path/notify"
-    
-    echo "  ✓ 创建 $path/notify"
-}
-
-# 配置网站通知
-setup_website() {
-    local name="$1"
-    local path="$2"
-    local method="$3"
-    
-    # 创建 webhook 接收端点
-    webhook_script="$FEISHU_NOTIFIER_DIR/webhooks/${name}.sh"
-    mkdir -p "$FEISHU_NOTIFIER_DIR/webhooks"
-    
-    cat > "$webhook_script" << EOF
-#!/bin/bash
-# $name 的 webhook 通知脚本
-# 用法: curl -X POST http://localhost:8080/webhook/$name -d '{"title":"","content":""}'
-
-/opt/feishu-notifier/bin/notify "[$name] \${1:-网站通知}" "\${2:-}"
-EOF
-    chmod +x "$webhook_script"
-    
-    # 创建网站调用示例
-    cat > "$path/notify-integration.php" << 'EOF'
-<?php
-// 网站集成 feishu-relay 示例
-// 在需要发送通知的地方调用:
-
-function send_notification($title, $content) {
-    $cmd = '/opt/feishu-notifier/bin/notify "' . escapeshellarg($title) . '" "' . escapeshellarg($content) . '"';
-    shell_exec($cmd);
-}
-
-// 使用示例
-// send_notification("网站提醒", "新用户注册");
-?>
-EOF
-    
-    echo "  ✓ 创建 webhook: $webhook_script"
-    echo "  ✓ 创建 PHP 集成示例: $path/notify-integration.php"
-}
-
-# 配置服务通知
-setup_service() {
-    local name="$1"
-    local path="$2"
-    local method="$3"
-    
-    # 创建服务通知脚本
-    notify_script="$FEISHU_NOTIFIER_DIR/services/${name}-notify.sh"
-    mkdir -p "$FEISHU_NOTIFIER_DIR/services"
-    
-    cat > "$notify_script" << EOF
-#!/bin/bash
-# $name 服务通知脚本
-
-/opt/feishu-notifier/bin/notify "[Service:$name] \${1:-状态变更}" "\${2:-}"
-EOF
-    chmod +x "$notify_script"
-    
-    echo "  ✓ 创建服务通知脚本: $notify_script"
-    echo "  在服务中调用: $notify_script '标题' '内容'"
-}
-
-# 配置脚本通知
-setup_script() {
-    local name="$1"
-    local path="$2"
-    local method="$3"
-    
-    # 在脚本开头添加通知函数
-    if [ -f "$path" ]; then
-        # 备份原脚本
-        cp "$path" "$path.backup.$(date +%s)"
-        
-        # 创建新脚本，添加通知函数
-        tmp_file=$(mktemp)
-        cat > "$tmp_file" << 'EOF'
-#!/bin/bash
-# 自动注入的 feishu-relay 通知函数
-notify() {
-    /opt/feishu-notifier/bin/notify "${1:-通知}" "${2:-}"
-}
-export -f notify
-
-EOF
-        # 追加原脚本内容（去掉 shebang）
-        tail -n +2 "$path" >> "$tmp_file"
-        mv "$tmp_file" "$path"
-        chmod +x "$path"
-        
-        echo "  ✓ 注入通知函数到: $path"
+    # 发送通知
+    if [[ -x "$NOTIFY_BIN" ]]; then
+        $NOTIFY_BIN "🆕 系统已注册" "名称: $name\n类型: $type\n路径: $path" 2>/dev/null || true
     fi
 }
 
-# 配置 cron 通知
-setup_cron() {
+# 注销系统
+cmd_unregister() {
     local name="$1"
-    local path="$2"
-    local method="$3"
     
-    # 创建 cron 包装脚本
-    wrapper="$FEISHU_NOTIFIER_DIR/cron-wrappers/${name}.sh"
-    mkdir -p "$FEISHU_NOTIFIER_DIR/cron-wrappers"
+    if [[ -z "$name" ]]; then
+        log_error "Usage: feishu-relay-register unregister <name>"
+        exit 1
+    fi
     
-    cat > "$wrapper" << EOF
-#!/bin/bash
-# $name 的 cron 包装脚本
-
-# 执行原命令
-$path
-
-# 发送完成通知
-/opt/feishu-notifier/bin/notify "[Cron:$name]" "任务执行完成"
-EOF
-    chmod +x "$wrapper"
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        log_error "Registry file not found"
+        exit 1
+    fi
     
-    echo "  ✓ 创建 cron 包装: $wrapper"
-    echo "  修改 crontab 使用: $wrapper"
+    if ! jq -e ".systems[] | select(.name == \"$name\")" "$REGISTRY_FILE" &>/dev/null; then
+        log_error "System '$name' not found in registry"
+        exit 1
+    fi
+    
+    jq "del(.systems[] | select(.name == \"$name\"))" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+    mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+    
+    log_success "Unregistered: $name"
 }
 
-# 列出所有注册的系统
-list_systems() {
-    init_registry
+# 列出所有系统
+cmd_list() {
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        log_info "No systems registered yet"
+        return
+    fi
     
-    echo "=== 已注册的系统 ==="
-    jq -r '.systems[] | "\(.name) [\(.type)] - \(.status) - \(.registered_at)"' "$REGISTRY_FILE" 2>/dev/null | column -t
+    local count=$(jq '.systems | length' "$REGISTRY_FILE")
     
     echo ""
-    echo "统计:"
-    jq '.systems | group_by(.type) | map({type: .[0].type, count: length})' "$REGISTRY_FILE" 2>/dev/null
+    echo "Registered Systems ($count total):"
+    echo "────────────────────────────────────────────────────────────"
+    printf "%-15s %-10s %-12s %-20s\n" "NAME" "TYPE" "STATUS" "PATH"
+    echo "────────────────────────────────────────────────────────────"
+    
+    jq -r '.systems[] | [.name, .type, .status, .path] | @tsv' "$REGISTRY_FILE" | \
+    while IFS=$'\t' read -r name type status path; do
+        printf "%-15s %-10s %-12s %-20s\n" "$name" "$type" "$status" "${path:0:35}"
+    done
+    
+    echo "────────────────────────────────────────────────────────────"
 }
 
-# 注销系统
-unregister_system() {
+# 显示系统详情
+cmd_status() {
     local name="$1"
     
-    init_registry
-    
-    tmp_file=$(mktemp)
-    jq --arg name "$name" '.systems = [.systems[] | select(.name != $name)]' "$REGISTRY_FILE" > "$tmp_file"
-    mv "$tmp_file" "$REGISTRY_FILE"
-    
-    echo "✓ 系统 '$name' 已注销"
+    if [[ -z "$name" ]]; then
+        # 显示整体状态
+        if [[ ! -f "$REGISTRY_FILE" ]]; then
+            log_info "No registry found"
+            return
+        fi
+        
+        local total=$(jq '.systems | length' "$REGISTRY_FILE")
+        local active=$(jq '[.systems[] | select(.status == "active")] | length' "$REGISTRY_FILE")
+        local auto=$(jq '[.systems[] | select(.auto_discovered == true)] | length' "$REGISTRY_FILE")
+        local manual=$((total - auto))
+        
+        echo ""
+        echo "Feishu Relay Registry Status"
+        echo "────────────────────────────────"
+        echo "Total systems:    $total"
+        echo "Active:           $active"
+        echo "Auto-discovered:  $auto"
+        echo "Manually added:   $manual"
+        echo "Registry file:    $REGISTRY_FILE"
+        echo "────────────────────────────────"
+    else
+        # 显示特定系统详情
+        if ! jq -e ".systems[] | select(.name == \"$name\")" "$REGISTRY_FILE" &>/dev/null; then
+            log_error "System '$name' not found"
+            exit 1
+        fi
+        
+        echo ""
+        echo "System Details: $name"
+        echo "────────────────────────────────"
+        jq ".systems[] | select(.name == \"$name\")" "$REGISTRY_FILE"
+        echo "────────────────────────────────"
+    fi
 }
 
-# 生成集成 SDK
-generate_sdk() {
-    local lang="$1"
+# 发送测试通知
+cmd_notify() {
+    local name="$1"
+    local message="${2:-Test notification}"
     
-    sdk_dir="$FEISHU_NOTIFIER_DIR/sdk/$lang"
-    mkdir -p "$sdk_dir"
+    if [[ -z "$name" ]]; then
+        log_error "Usage: feishu-relay-register notify <name> [message]"
+        exit 1
+    fi
     
-    case "$lang" in
-        bash|shell)
-            cat > "$sdk_dir/notify.sh" << 'EOF'
-#!/bin/bash
-# Feishu Relay SDK for Bash
-# 用法: source /opt/feishu-notifier/sdk/bash/notify.sh
-
-FEISHU_NOTIFY_CMD="/opt/feishu-notifier/bin/notify"
-
-notify() {
-    local title="${1:-通知}"
-    local content="${2:-}"
-    "$FEISHU_NOTIFY_CMD" "$title" "$content"
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        log_error "Registry file not found"
+        exit 1
+    fi
+    
+    if ! jq -e ".systems[] | select(.name == \"$name\")" "$REGISTRY_FILE" &>/dev/null; then
+        log_error "System '$name' not found"
+        exit 1
+    fi
+    
+    local type=$(jq -r ".systems[] | select(.name == \"$name\") | .type" "$REGISTRY_FILE")
+    
+    if [[ -x "$NOTIFY_BIN" ]]; then
+        $NOTIFY_BIN "[$name] $type" "$message"
+        log_success "Notification sent for $name"
+    else
+        log_error "Notify binary not found: $NOTIFY_BIN"
+        exit 1
+    fi
 }
 
-notify_later() {
-    local minutes="$1"
-    shift
-    local title="$1"
-    shift
-    local content="$*"
-    /opt/feishu-notifier/bin/feishu-task-v2 in "$minutes" "$title" "$content"
-}
-
-export -f notify notify_later
-EOF
-            echo "✓ 生成 Bash SDK: $sdk_dir/notify.sh"
-            ;;
-            
-        python|py)
-            cat > "$sdk_dir/notify.py" << 'EOF'
-#!/usr/bin/env python3
-"""Feishu Relay SDK for Python"""
-import subprocess
-import os
-
-FEISHU_NOTIFY_CMD = "/opt/feishu-notifier/bin/notify"
-FEISHU_TASK_CMD = "/opt/feishu-notifier/bin/feishu-task-v2"
-
-def notify(title="通知", content=""):
-    """发送立即通知"""
-    subprocess.run([FEISHU_NOTIFY_CMD, title, content], check=False)
-
-def notify_later(minutes, title, content=""):
-    """发送定时通知"""
-    subprocess.run([FEISHU_TASK_CMD, "in", str(minutes), title, content], check=False)
-
-if __name__ == "__main__":
-    notify("测试", "Python SDK 工作正常")
-EOF
-            echo "✓ 生成 Python SDK: $sdk_dir/notify.py"
-            ;;
-            
-        php)
-            cat > "$sdk_dir/notify.php" << 'EOF'
-<?php
-/** Feishu Relay SDK for PHP */
-
-class FeishuRelay {
-    const NOTIFY_CMD = "/opt/feishu-notifier/bin/notify";
-    const TASK_CMD = "/opt/feishu-notifier/bin/feishu-task-v2";
+# 触发手动扫描
+cmd_scan() {
+    log_info "Triggering manual discovery scan..."
     
-    public static function notify($title = "通知", $content = "") {
-        $cmd = self::NOTIFY_CMD . " " . escapeshellarg($title) . " " . escapeshellarg($content);
-        shell_exec($cmd);
-    }
-    
-    public static function notifyLater($minutes, $title, $content = "") {
-        $cmd = self::TASK_CMD . " in " . intval($minutes) . " " . escapeshellarg($title) . " " . escapeshellarg($content);
-        shell_exec($cmd);
-    }
+    if [[ -f "/opt/feishu-notifier/lib/feishu-relay-auto-discovery.py" ]]; then
+        python3 /opt/feishu-notifier/lib/feishu-relay-auto-discovery.py
+    else
+        log_error "Auto discovery script not found"
+        exit 1
+    fi
 }
 
-// 使用示例
-// FeishuRelay::notify("网站提醒", "新订单");
-?>
-EOF
-            echo "✓ 生成 PHP SDK: $sdk_dir/notify.php"
-            ;;
-            
-        *)
-            echo "不支持的 SDK 语言: $lang"
-            echo "支持: bash, python, php"
-            ;;
-    esac
-}
-
-# 帮助
-help() {
+# 显示帮助
+cmd_help() {
     cat << 'EOF'
-用法: feishu-relay-register <命令> [参数]
+Feishu Relay System Registration
 
-命令:
-  register <name> <type> <path> [method]  注册新系统
-  unregister <name>                        注销系统
-  list                                      列出所有注册系统
-  sdk <language>                            生成 SDK (bash/python/php)
+USAGE:
+    feishu-relay-register <command> [options]
 
-类型:
-  skill      - OpenClaw skill
-  website    - 网站/Web应用
-  service    - systemd 服务
-  script     - 脚本文件
-  cron       - cron 定时任务
+COMMANDS:
+    register <name> [type] [path]   Register a new system
+    unregister <name>               Remove a system from registry
+    list                            List all registered systems
+    status [name]                   Show status (all or specific system)
+    notify <name> [message]         Send test notification
+    scan                            Trigger manual discovery scan
+    help                            Show this help message
 
-示例:
-  # 注册新网站
-  feishu-relay-register register myapp website /var/www/myapp
+EXAMPLES:
+    # Register a website
+    feishu-relay-register register myapp website /var/www/myapp
 
-  # 注册新服务
-  feishu-relay-register register myservice service /opt/myservice
+    # Register current directory as a service
+    feishu-relay-register register myapi service
 
-  # 生成 Python SDK
-  feishu-relay-register sdk python
+    # List all systems
+    feishu-relay-register list
 
-  # 列出所有注册系统
-  feishu-relay-register list
+    # Send test notification
+    feishu-relay-register notify myapp "Deployment successful"
+
+    # Trigger discovery scan
+    feishu-relay-register scan
+
+SYSTEM TYPES:
+    website    - Web applications (HTML, PHP, Node.js, etc.)
+    service    - Background services and APIs
+    skill      - OpenClaw skills
+    task       - Scheduled tasks and cron jobs
+    data       - Data processing pipelines
 
 EOF
 }
 
-# 主程序
+# 主函数
 main() {
-    case "$1" in
+    local cmd="${1:-help}"
+    
+    case "$cmd" in
         register)
-            [ -z "$2" ] && { echo "错误: 缺少系统名称"; help; exit 1; }
-            [ -z "$3" ] && { echo "错误: 缺少系统类型"; help; exit 1; }
-            [ -z "$4" ] && { echo "错误: 缺少系统路径"; help; exit 1; }
-            register_system "$2" "$3" "$4" "${5:-auto}"
+            cmd_register "$2" "$3" "$4"
             ;;
-        unregister)
-            [ -z "$2" ] && { echo "错误: 缺少系统名称"; exit 1; }
-            unregister_system "$2"
+        unregister|remove|delete)
+            cmd_unregister "$2"
             ;;
-        list)
-            list_systems
+        list|ls)
+            cmd_list
             ;;
-        sdk)
-            [ -z "$2" ] && { echo "错误: 缺少语言"; help; exit 1; }
-            generate_sdk "$2"
+        status|info)
+            cmd_status "$2"
+            ;;
+        notify|test)
+            cmd_notify "$2" "$3"
+            ;;
+        scan|discover)
+            cmd_scan
+            ;;
+        help|--help|-h)
+            cmd_help
             ;;
         *)
-            help
+            log_error "Unknown command: $cmd"
+            cmd_help
+            exit 1
             ;;
     esac
 }
