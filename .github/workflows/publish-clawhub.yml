@@ -22,7 +22,7 @@ jobs:
     
     - name: Publish to ClawHub
       env:
-        CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        CLAWHUB_TOKEN: clh_aWWHOl5D0JoRqHjtpfqC7vcbk1sS9vGbeacoPmuHPKo
       run: |
         # 登录 ClawHub
         echo "$CLAWHUB_TOKEN" | clawhub login --token-stdin
