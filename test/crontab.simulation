@@ -1,0 +1,8 @@
+# 模拟 crontab 任务 - 每分钟执行
+* * * * * /opt/feishu-notifier/test/scenarios/cron-task.sh
+
+# 系统监控 - 每5分钟
+*/5 * * * * /opt/feishu-notifier/test/scenarios/system-monitor.sh
+
+# 每日备份 - 每天凌晨2点
+0 2 * * * /opt/feishu-notifier/test/scenarios/backup-task.sh

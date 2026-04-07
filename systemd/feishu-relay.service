@@ -1,0 +1,14 @@
+[Unit]
+Description=Feishu Relay - Unified Notification Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/feishu-notifier/lib/feishu-relay.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

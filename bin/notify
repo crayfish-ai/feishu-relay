@@ -1,0 +1,53 @@
+#!/bin/bash
+# /opt/feishu-notifier/bin/notify
+# 统一通知入口 - 使用 feishu-task-notifier
+
+set -euo pipefail
+
+FEISHU_NOTIFY="/opt/feishu-notifier/bin/feishu_notify.sh"
+QUEUE_DB="/opt/feishu-notifier/queue/notify-queue.db"
+CONFIG_FILE="/opt/feishu-notifier/config/feishu.env"
+
+# 加载环境变量
+if [[ -f "$CONFIG_FILE" ]]; then
+    set -a
+    source "$CONFIG_FILE"
+    set +a
+fi
+
+TITLE="${1:-}"
+CONTENT="${2:-}"
+
+# 检查标题
+if [[ -z "$TITLE" ]]; then
+    echo "Usage: notify <title> [content]" >&2
+    exit 1
+fi
+
+# 如果没有内容参数，从 stdin 读取
+if [[ -z "$CONTENT" ]] && [[ ! -t 0 ]]; then
+    CONTENT=$(cat)
+fi
+
+# 如果内容为空，使用默认值
+if [[ -z "$CONTENT" ]]; then
+    CONTENT="(无内容)"
+fi
+
+# 转义单引号用于 SQL
+SQL_TITLE=$(echo "$TITLE" | sed "s/'/''/g")
+SQL_CONTENT=$(echo "$CONTENT" | sed "s/'/''/g")
+
+# 尝试直接发送
+if "$FEISHU_NOTIFY" -t "$TITLE" -m "$CONTENT" >/dev/null 2>&1; then
+    echo '{"status":"sent"}'
+    exit 0
+fi
+
+# 失败则入队等待重试
+if sqlite3 "$QUEUE_DB" "INSERT INTO queue(title,content)VALUES('$SQL_TITLE','$SQL_CONTENT');" 2>/dev/null; then
+    echo '{"status":"queued"}'
+else
+    echo '{"status":"error","msg":"failed to queue"}' >&2
+    exit 1
+fi
