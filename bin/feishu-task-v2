@@ -15,8 +15,8 @@ add_task() {
     local title="$2"
     local content="${3:-$2}"
     
-    # 计算执行时间
-    local execute_at=$(date -d "+$delay_minutes minutes" "+%Y-%m-%d %H:%M:%S")
+    # 计算执行时间（使用 UTC，与 SQLite 一致）
+    local execute_at=$(date -u -d "+$delay_minutes minutes" "+%Y-%m-%d %H:%M:%S")
     
     # 转义单引号
     local safe_title=$(echo "$title" | sed "s/'/''/g")

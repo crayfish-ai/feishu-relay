@@ -41,8 +41,15 @@ def process_one():
     cursor = conn.cursor()
     
     # 取一条待处理消息（execute_at 为 NULL 或已到时间）
-    # 使用本地时间比较
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # 使用 UTC 时间比较（与 SQLite 一致）
+    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    log(f"Checking queue at {now_str}")
+    
+    # 先检查队列中有多少条记录
+    cursor.execute("SELECT COUNT(*) FROM queue")
+    count = cursor.fetchone()[0]
+    log(f"Queue count: {count}")
+    
     cursor.execute("""
         SELECT id, title, content, retry, execute_at 
         FROM queue 
@@ -53,8 +60,11 @@ def process_one():
     row = cursor.fetchone()
     
     if not row:
+        log("No message to process")
         conn.close()
         return False
+    
+    log(f"Found message: {row}")
     
     msg_id, title, content, retry, execute_at = row
     
@@ -103,9 +113,13 @@ def process_one():
     return True
 
 def log(msg):
-    """输出日志到 stdout（journald）"""
+    """输出日志到 stdout（journald）和文件"""
     timestamp = time.strftime('%H:%M:%S')
-    print(f"[{timestamp}] {msg}", flush=True)
+    log_line = f"[{timestamp}] {msg}"
+    print(log_line, flush=True)
+    # 同时写入文件日志
+    with open('/var/log/feishu-relay.log', 'a') as f:
+        f.write(log_line + '\n')
 
 def main():
     init_db()
