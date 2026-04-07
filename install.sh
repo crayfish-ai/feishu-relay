@@ -77,6 +77,47 @@ systemctl enable feishu-relay
 # 创建软链接
 ln -sf "$INSTALL_DIR/bin/notify" /usr/local/bin/notify 2>/dev/null || true
 
+# 安装定时任务示例（可选）
+echo ""
+read -p "是否安装定时任务示例? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "安装定时任务..."
+    
+    # 创建定时任务脚本
+    cat > "$INSTALL_DIR/bin/daily-health-check.sh" << 'EOF'
+#!/bin/bash
+# 每日健康检查
+
+# 磁盘使用率
+DISK_USAGE=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
+if [ "$DISK_USAGE" -gt 80 ]; then
+    /opt/feishu-notifier/bin/notify "⚠️ 磁盘告警" "使用率 ${DISK_USAGE}%，请及时清理"
+fi
+
+# 内存使用率
+MEM_USAGE=$(free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}')
+if [ "$MEM_USAGE" -gt 90 ]; then
+    /opt/feishu-notifier/bin/notify "⚠️ 内存告警" "使用率 ${MEM_USAGE}%，请检查进程"
+fi
+
+# 负载
+LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',')
+/opt/feishu-notifier/bin/notify "📊 每日健康报告" "磁盘: ${DISK_USAGE}% | 内存: ${MEM_USAGE}% | 负载: ${LOAD}"
+EOF
+    chmod +x "$INSTALL_DIR/bin/daily-health-check.sh"
+    
+    # 添加到 crontab
+    (crontab -l 2>/dev/null || echo "") | grep -v "feishu-relay" > /tmp/crontab.tmp
+    echo "" >> /tmp/crontab.tmp
+    echo "# Feishu Relay - 每日健康检查 (由 install.sh 自动安装)" >> /tmp/crontab.tmp
+    echo "0 9 * * * $INSTALL_DIR/bin/daily-health-check.sh" >> /tmp/crontab.tmp
+    crontab /tmp/crontab.tmp
+    rm /tmp/crontab.tmp
+    
+    echo "✓ 已安装每日 9:00 健康检查任务"
+fi
+
 echo ""
 echo "=== 安装完成 ==="
 echo ""
@@ -97,4 +138,7 @@ echo "   sudo systemctl start feishu-relay"
 echo ""
 echo "4. 测试:"
 echo "   /opt/feishu-notifier/bin/notify '测试' '消息内容'"
+echo ""
+echo "5. 查看定时任务:"
+echo "   crontab -l"
 echo ""
