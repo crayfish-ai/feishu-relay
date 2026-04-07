@@ -1,0 +1,134 @@
+#!/bin/bash
+# feishu-relay-task v2 - 基于 feishu-relay 队列的统一任务管理
+# 特点：所有任务走 feishu-relay 队列，统一消费
+
+TASK_DB="/opt/feishu-notifier/queue/notify-queue.db"
+
+# 初始化数据库（添加 execute_at 字段）
+init() {
+    sqlite3 "$TASK_DB" "ALTER TABLE queue ADD COLUMN execute_at TIMESTAMP;" 2>/dev/null || true
+}
+
+# 添加定时任务（写入队列，带执行时间）
+add_task() {
+    local delay_minutes="$1"
+    local title="$2"
+    local content="${3:-$2}"
+    
+    # 计算执行时间
+    local execute_at=$(date -d "+$delay_minutes minutes" "+%Y-%m-%d %H:%M:%S")
+    
+    # 转义单引号
+    local safe_title=$(echo "$title" | sed "s/'/''/g")
+    local safe_content=$(echo "$content" | sed "s/'/''/g")
+    
+    # 写入队列
+    sqlite3 "$TASK_DB" "
+        INSERT INTO queue(title, content, execute_at) 
+        VALUES('$safe_title', '$safe_content', '$execute_at');
+    "
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ 已设置 ${delay_minutes} 分钟后提醒: $title"
+        echo "  执行时间: $execute_at"
+    else
+        echo "✗ 设置失败"
+    fi
+}
+
+# 立即发送（直接入队，execute_at 为 NULL）
+send_now() {
+    local title="$1"
+    local content="${2:-$1}"
+    
+    local safe_title=$(echo "$title" | sed "s/'/''/g")
+    local safe_content=$(echo "$content" | sed "s/'/''/g")
+    
+    sqlite3 "$TASK_DB" "
+        INSERT INTO queue(title, content) 
+        VALUES('$safe_title', '$safe_content');
+    "
+    
+    echo "✓ 已加入发送队列: $title"
+}
+
+# 列出待执行的任务
+list() {
+    echo "=== 待执行的任务 ==="
+    sqlite3 "$TASK_DB" "
+        SELECT id, 
+               title,
+               COALESCE(execute_at, '立即') as exec_time,
+               CASE 
+                   WHEN execute_at IS NULL THEN '等待中'
+                   WHEN execute_at <= datetime('now') THEN '即将执行'
+                   ELSE '等待中'
+               END as status
+        FROM queue 
+        ORDER BY execute_at NULLS LAST, created_at
+        LIMIT 20;
+    " 2>/dev/null | column -t -s '|'
+    
+    echo ""
+    echo "队列统计:"
+    sqlite3 "$TASK_DB" "
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN execute_at IS NULL THEN 1 ELSE 0 END) as immediate,
+            SUM(CASE WHEN execute_at > datetime('now') THEN 1 ELSE 0 END) as scheduled
+        FROM queue;
+    " 2>/dev/null | column -t -s '|'
+}
+
+# 删除任务
+remove() {
+    local id="$1"
+    sqlite3 "$TASK_DB" "DELETE FROM queue WHERE id = $id;"
+    echo "✓ 已删除任务 $id"
+}
+
+# 帮助
+help() {
+    cat << 'EOF'
+用法: feishu-task <命令> [参数]
+
+命令:
+  in <分钟> <标题> [内容]    设置 N 分钟后提醒
+  now <标题> [内容]           立即发送
+  list                        列出待执行的任务
+  remove <ID>                 删除任务
+
+示例:
+  feishu-task in 30 "该休息了"      # 30分钟后提醒
+  feishu-task now "测试" "立即发送"  # 立即发送
+  feishu-task list                  # 查看队列
+
+特点:
+  - 所有任务统一进入 feishu-relay 队列
+  - 支持定时执行（到时间自动发送）
+  - 支持立即发送（加入队列，尽快处理）
+  - 其他技能/系统可共用同一队列
+
+EOF
+}
+
+# 主逻辑
+init
+
+case "$1" in
+    in)
+        add_task "$2" "$3" "$4"
+        ;;
+    now)
+        send_now "$2" "$3"
+        ;;
+    list)
+        list
+        ;;
+    remove)
+        remove "$2"
+        ;;
+    *)
+        help
+        ;;
+esac

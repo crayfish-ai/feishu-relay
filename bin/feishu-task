@@ -1,0 +1,87 @@
+#!/bin/bash
+# feishu-relay 任务管理器 v2
+# 使用 SQLite 队列 + feishu-relay 消费，不依赖 at
+
+TASK_DB="/opt/feishu-notifier/queue/notify-queue.db"
+
+# 添加定时任务（写入队列，带执行时间）
+add_task() {
+    local delay_minutes="$1"
+    local title="$2"
+    local content="${3:-$2}"
+    
+    # 计算执行时间
+    local execute_at=$(date -d "+$delay_minutes minutes" "+%Y-%m-%d %H:%M:%S")
+    
+    # 写入队列（添加 execute_at 字段）
+    sqlite3 "$TASK_DB" "
+        ALTER TABLE queue ADD COLUMN execute_at TIMESTAMP;
+    " 2>/dev/null || true
+    
+    sqlite3 "$TASK_DB" "
+        INSERT INTO queue(title, content, execute_at) 
+        VALUES('$title', '$content', '$execute_at');
+    "
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ 已设置 ${delay_minutes} 分钟后提醒: $title (执行时间: $execute_at)"
+    else
+        echo "✗ 设置失败"
+    fi
+}
+
+# 立即发送（不走队列，直接发送）
+send_now() {
+    local title="$1"
+    local content="${2:-$1}"
+    /opt/feishu-notifier/bin/notify "$title" "$content"
+}
+
+# 列出待执行的任务
+list() {
+    echo "=== 待执行的任务 ==="
+    sqlite3 "$TASK_DB" "
+        SELECT id, title, execute_at, 
+               CASE 
+                   WHEN execute_at > datetime('now') THEN '等待中'
+                   ELSE '即将执行'
+               END as status
+        FROM queue 
+        WHERE execute_at > datetime('now') OR execute_at IS NULL
+        ORDER BY execute_at;
+    " 2>/dev/null | column -t -s '|'
+}
+
+# 帮助
+help() {
+    cat << 'EOF'
+用法: feishu-task <命令> [参数]
+
+命令:
+  in <分钟> <标题> [内容]    设置 N 分钟后提醒
+  now <标题> [内容]           立即发送
+  list                        列出待执行的任务
+  help                        显示帮助
+
+示例:
+  feishu-task in 30 "该休息了"      # 30分钟后提醒
+  feishu-task now "测试" "立即发送"  # 立即发送
+
+EOF
+}
+
+# 主逻辑
+case "$1" in
+    in)
+        add_task "$2" "$3" "$4"
+        ;;
+    now)
+        send_now "$2" "$3"
+        ;;
+    list)
+        list
+        ;;
+    *)
+        help
+        ;;
+esac
