@@ -143,16 +143,24 @@ def on_complete():
     ])
 ```
 
-### 在 Crontab 中使用
+### 在 Crontab 中使用（推荐）
+
+**⚠️ 重要：使用系统 crontab，不是 OpenClaw cron**
 
 ```bash
-# 编辑 crontab
+# 编辑系统 crontab
 crontab -e
 
-# 添加任务
-*/5 * * * * /opt/monitor.sh
+# 添加任务示例
+*/5 * * * * /opt/feishu-notifier/bin/notify "系统状态" "$(df -h / | tail -1)"
 0 2 * * * /opt/backup.sh && /opt/feishu-notifier/bin/notify "备份完成" "每日备份成功"
+0 23 * * * /opt/feishu-notifier/bin/notify "⏰ 提醒" "该休息了"
 ```
+
+**为什么不用 OpenClaw cron？**
+- OpenClaw cron 是独立的定时系统，与 feishu-relay 无关
+- 系统 crontab + feishu-relay 更可靠，不依赖 OpenClaw 运行状态
+- 符合"统一通知中心"设计：所有通知走 feishu-relay
 
 ## 配置说明
 
