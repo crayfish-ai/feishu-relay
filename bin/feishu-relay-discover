@@ -1,0 +1,167 @@
+#!/bin/bash
+# Feishu Relay 自动发现和接管
+# 扫描系统中所有可能发送通知的地方，自动接管
+
+FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
+DISCOVERY_LOG="/var/log/feishu-relay-discovery.log"
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $*" | tee -a "$DISCOVERY_LOG"
+}
+
+# ========== 1. 发现 crontab 中的通知 ==========
+discover_crontab_notifications() {
+    log "=== 发现 crontab 通知 ==="
+    
+    # 查找所有用户的 crontab
+    for user in $(cut -f1 -d: /etc/passwd | grep -E "^(root|ubuntu|admin)"); do
+        crontab -u "$user" -l 2>/dev/null | while read line; do
+            [[ "$line" =~ ^# ]] && continue
+            [[ -z "$line" ]] && continue
+            
+            # 查找包含通知关键词的任务
+            if echo "$line" | grep -qE "(notify|message|alert|echo.*通知|print.*通知)"; then
+                log "发现 [$user] 的通知任务: ${line:0:80}..."
+            fi
+        done
+    done
+}
+
+# ========== 2. 发现脚本中的通知 ==========
+discover_script_notifications() {
+    log "=== 发现脚本中的通知 ==="
+    
+    # 查找常见位置的脚本
+    for dir in /opt/*/bin ~/.local/bin ~/bin /usr/local/bin; do
+        [ -d "$dir" ] || continue
+        
+        for script in "$dir"/*; do
+            [ -f "$script" ] || continue
+            [ -x "$script" ] || continue
+            
+            # 检查是否包含通知命令
+            if grep -lE "(echo|print|notify|message|alert|send)" "$script" 2>/dev/null | head -1 > /dev/null; then
+                script_name=$(basename "$script")
+                log "发现可能发送通知的脚本: $script_name"
+            fi
+        done
+    done
+}
+
+# ========== 3. 发现 systemd 服务中的通知 ==========
+discover_systemd_notifications() {
+    log "=== 发现 systemd 服务通知 ==="
+    
+    systemctl list-units --type=service --state=running | grep -v "^●" | while read line; do
+        service=$(echo "$line" | awk '{print $1}')
+        [ -z "$service" ] && continue
+        
+        # 检查服务配置中是否有通知
+        if systemctl cat "$service" 2>/dev/null | grep -qE "(notify|message|alert)"; then
+            log "发现服务可能发送通知: $service"
+        fi
+    done
+}
+
+# ========== 4. 发现 OpenClaw skill 中的通知 ==========
+discover_skill_notifications() {
+    log "=== 发现 OpenClaw skill 通知 ==="
+    
+    SKILL_DIRS=(
+        "/opt/openclaw/skills"
+        "$HOME/.openclaw/skills"
+        "/root/.openclaw/workspace/skills"
+    )
+    
+    for base_dir in "${SKILL_DIRS[@]}"; do
+        [ -d "$base_dir" ] || continue
+        
+        for skill_dir in "$base_dir"/*; do
+            [ -d "$skill_dir" ] || continue
+            skill_name=$(basename "$skill_dir")
+            
+            # 检查脚本中是否有通知
+            notify_count=$(grep -rE "(echo|print|notify|message)" "$skill_dir"/*.sh 2>/dev/null | wc -l)
+            
+            if [ "$notify_count" -gt 0 ]; then
+                log "发现 skill '$skill_name' 有 $notify_count 处可能发送通知"
+                
+                # 检查是否已集成 feishu-relay
+                if [ -f "$skill_dir/notify" ] || grep -rq "feishu-relay\|/opt/feishu-notifier" "$skill_dir" 2>/dev/null; then
+                    log "  ✓ 已集成 feishu-relay"
+                else
+                    log "  ⚠️ 未集成 feishu-relay，建议迁移"
+                fi
+            fi
+        done
+    done
+}
+
+# ========== 5. 生成接管报告 ==========
+generate_takeover_report() {
+    log "=== 生成接管报告 ==="
+    
+    REPORT_FILE="/tmp/feishu-relay-takeover-report.txt"
+    
+    cat > "$REPORT_FILE" <> EOF
+Feishu Relay 自动接管报告
+生成时间: $(date)
+========================================
+
+本报告列出系统中所有可能发送通知的组件，
+以及它们是否已经集成 feishu-relay。
+
+已集成 feishu-relay 的组件:
+$(grep "✓ 已集成" "$DISCOVERY_LOG" 2>/dev/null || echo "  无")
+
+建议迁移的组件:
+$(grep "⚠️ 未集成" "$DISCOVERY_LOG" 2>/dev/null || echo "  无")
+
+发现的通知源:
+$(grep "发现" "$DISCOVERY_LOG" 2>/dev/null | grep -v "✓\|⚠️" || echo "  无")
+
+========================================
+迁移命令:
+  /opt/feishu-notifier/bin/feishu-relay-migrate all
+
+查看详细日志:
+  cat $DISCOVERY_LOG
+EOF
+
+    log "报告已生成: $REPORT_FILE"
+    cat "$REPORT_FILE"
+}
+
+# ========== 主程序 ==========
+main() {
+    log "========== Feishu Relay 自动发现开始 =========="
+    
+    case "$1" in
+        crontab)
+            discover_crontab_notifications
+            ;;
+        scripts)
+            discover_script_notifications
+            ;;
+        systemd)
+            discover_systemd_notifications
+            ;;
+        skills)
+            discover_skill_notifications
+            ;;
+        report)
+            generate_takeover_report
+            ;;
+        all|*)
+            discover_crontab_notifications
+            discover_script_notifications
+            discover_systemd_notifications
+            discover_skill_notifications
+            generate_takeover_report
+            ;;
+    esac
+    
+    log "========== 发现完成 =========="
+}
+
+main "$@"

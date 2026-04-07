@@ -1,0 +1,173 @@
+#!/bin/bash
+# Feishu Relay 自动迁移工具
+# 将现有系统、配置、skill 迁移到使用 feishu-relay
+
+FEISHU_NOTIFIER_DIR="/opt/feishu-notifier"
+LOG_FILE="/var/log/feishu-relay-migration.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# ========== 1. 迁移系统 crontab ==========
+migrate_crontab() {
+    log "=== 迁移系统 crontab ==="
+    
+    # 备份原 crontab
+    crontab -l > /tmp/crontab.backup 2>/dev/null || true
+    
+    # 查找使用 echo/print 发送通知的 cron 任务
+    # 替换为 feishu-relay
+    crontab -l 2>/dev/null | while read line; do
+        # 跳过注释和空行
+        [[ "$line" =~ ^# ]] && continue
+        [[ -z "$line" ]] && continue
+        
+        # 检查是否包含通知相关的命令
+        if echo "$line" | grep -qE "(echo|print|notify|message|alert)"; then
+            log "发现可能的通知任务: $line"
+            # 这里可以添加自动替换逻辑
+        fi
+    done
+    
+    log "✓ crontab 备份完成: /tmp/crontab.backup"
+}
+
+# ========== 2. 迁移现有 skill ==========
+migrate_skills() {
+    log "=== 迁移现有 skill ==="
+    
+    SKILL_DIRS=(
+        "/opt/openclaw/skills"
+        "$HOME/.openclaw/skills"
+        "/root/.openclaw/workspace/skills"
+    )
+    
+    for base_dir in "${SKILL_DIRS[@]}"; do
+        [ -d "$base_dir" ] || continue
+        
+        for skill_dir in "$base_dir"/*; do
+            [ -d "$skill_dir" ] || continue
+            skill_name=$(basename "$skill_dir")
+            
+            log "检查 skill: $skill_name"
+            
+            # 检查是否已有 notify 脚本
+            if [ -f "$skill_dir/notify" ]; then
+                log "  ✓ 已有 notify 脚本"
+                continue
+            fi
+            
+            # 检查 SKILL.md 是否提到通知
+            if [ -f "$skill_dir/SKILL.md" ]; then
+                if grep -qE "(notify|message|alert|通知)" "$skill_dir/SKILL.md"; then
+                    log "  ⚠️ SKILL.md 提到通知，但未集成 feishu-relay"
+                fi
+            fi
+            
+            # 自动创建 notify 脚本
+            cat > "$skill_dir/notify" << EOF
+#!/bin/bash
+# $skill_name 的通知脚本（自动迁移生成）
+/opt/feishu-notifier/bin/notify "[$skill_name] \${1:-通知}" "\${2:-}"
+EOF
+            chmod +x "$skill_dir/notify"
+            log "  ✓ 创建 notify 脚本"
+        done
+    done
+}
+
+# ========== 3. 迁移文献管理系统 ==========
+migrate_literature_system() {
+    log "=== 迁移文献管理系统 ==="
+    
+    PAPERS_DIR="/data/disk/papers"
+    AUTO_INDEX="$PAPERS_DIR/auto_index.sh"
+    
+    if [ -f "$AUTO_INDEX" ]; then
+        # 检查是否已集成
+        if grep -q "feishu-relay\|notify" "$AUTO_INDEX"; then
+            log "✓ 文献管理系统已集成 feishu-relay"
+        else
+            log "⚠️ 文献管理系统未集成，需要手动添加"
+            log "  请运行: /opt/feishu-notifier/bin/feishu-relay-setup literature"
+        fi
+    else
+        log "⚠️ 未找到文献管理系统"
+    fi
+}
+
+# ========== 4. 创建系统监控 ==========
+setup_system_monitor() {
+    log "=== 设置系统监控 ==="
+    
+    # 检查是否已有磁盘监控
+    if crontab -l 2>/dev/null | grep -q "disk.*monitor\|monitor.*disk"; then
+        log "✓ 磁盘监控已存在"
+    else
+        log "添加磁盘监控到 crontab..."
+        (crontab -l 2>/dev/null; echo "0 */6 * * * /opt/feishu-notifier/bin/notify \"💾 系统监控\" \"磁盘使用率: \$(df / | awk 'NR==2{print \$5}')\"") | crontab -
+        log "✓ 磁盘监控已添加"
+    fi
+}
+
+# ========== 5. 验证迁移 ==========
+verify_migration() {
+    log "=== 验证迁移 ==="
+    
+    # 检查全局命令
+    if [ -x "/usr/local/bin/notify" ]; then
+        log "✓ 全局 notify 命令可用"
+    else
+        log "✗ 全局 notify 命令缺失"
+    fi
+    
+    # 检查 feishu-relay 服务
+    if systemctl is-active feishu-relay > /dev/null 2>&1; then
+        log "✓ feishu-relay 服务运行中"
+    else
+        log "✗ feishu-relay 服务未运行"
+    fi
+    
+    # 测试发送
+    if /opt/feishu-notifier/bin/notify "迁移测试" "系统迁移验证" > /dev/null 2>&1; then
+        log "✓ 通知发送测试通过"
+    else
+        log "✗ 通知发送测试失败"
+    fi
+}
+
+# ========== 主程序 ==========
+main() {
+    log "========== Feishu Relay 自动迁移开始 =========="
+    
+    case "$1" in
+        crontab)
+            migrate_crontab
+            ;;
+        skills)
+            migrate_skills
+            ;;
+        literature)
+            migrate_literature_system
+            ;;
+        monitor)
+            setup_system_monitor
+            ;;
+        verify)
+            verify_migration
+            ;;
+        all|*)
+            migrate_crontab
+            migrate_skills
+            migrate_literature_system
+            setup_system_monitor
+            verify_migration
+            ;;
+    esac
+    
+    log "========== 迁移完成 =========="
+    log "日志文件: $LOG_FILE"
+}
+
+main "$@"
