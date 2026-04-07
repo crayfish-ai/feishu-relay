@@ -1,0 +1,38 @@
+name: Publish to ClawHub
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Install ClawHub CLI
+      run: npm install -g @clawhub/cli
+    
+    - name: Publish to ClawHub
+      env:
+        CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+      run: |
+        # 登录 ClawHub
+        echo "$CLAWHUB_TOKEN" | clawhub login --token-stdin
+        
+        # 获取版本号
+        VERSION=$(node -p "require('./package.json').version || '1.0.0'")
+        
+        # 发布到 ClawHub
+        clawhub publish . \
+          --slug feishu-relay \
+          --name "Feishu Relay" \
+          --version "$VERSION" \
+          --changelog "Auto-published from GitHub Actions"
