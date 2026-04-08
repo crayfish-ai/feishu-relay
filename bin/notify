@@ -1,0 +1,3 @@
+#!/bin/bash
+# 统一通知入口
+/opt/feishu-notifier/bin/feishu_notify.sh "$@"
