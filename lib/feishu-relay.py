@@ -41,8 +41,8 @@ def process_one():
     cursor = conn.cursor()
     
     # 取一条待处理消息（execute_at 为 NULL 或已到时间）
-    # 使用 UTC 时间比较（与 SQLite 一致）
-    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    # 使用本地时间（北京时间）比较
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log(f"Checking queue at {now_str}")
     
     # 先检查队列中有多少条记录
