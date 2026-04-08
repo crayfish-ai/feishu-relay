@@ -1,6 +1,6 @@
 {
   "name": "feishu-relay",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "统一飞书通知系统 - 可靠的消息队列和重试机制",
   "author": "crayfish-ai",
   "license": "MIT",
