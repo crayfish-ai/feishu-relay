@@ -1,0 +1,5 @@
+#!/bin/bash
+# feishu-notifier 的通知脚本（自动生成）
+# 发送通知到 feishu-relay
+
+/opt/feishu-notifier/bin/notify "[feishu-notifier] ${1:-通知}" "${2:-}"
