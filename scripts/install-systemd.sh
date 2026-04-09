@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NOTIFY_SCRIPT="${SKILL_DIR}/run.sh"
 SERVICE_DIR="${HOME}/.config/systemd/user"
-SERVICE_FILE="${SERVICE_DIR}/feishu-notifier.service"
+SERVICE_FILE="${SERVICE_DIR}/feishu-relay.service"
 
 usage() {
     echo "Usage: $0 --install | --uninstall | --dry-run | --help"
@@ -93,20 +93,20 @@ do_install() {
         echo "Installed successfully"
         echo ""
         echo "To enable and start:"
-        echo "  systemctl --user enable feishu-notifier"
-        echo "  systemctl --user start feishu-notifier"
+        echo "  systemctl --user enable feishu-relay"
+        echo "  systemctl --user start feishu-relay"
     fi
 }
 
 do_uninstall() {
-    echo "Removing feishu-notifier service..."
+    echo "Removing feishu-relay service..."
     
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY RUN] Would remove: $SERVICE_FILE"
     else
         # Stop if running
-        systemctl --user stop feishu-notifier 2>/dev/null || true
-        systemctl --user disable feishu-notifier 2>/dev/null || true
+        systemctl --user stop feishu-relay 2>/dev/null || true
+        systemctl --user disable feishu-relay 2>/dev/null || true
         
         # Remove service file
         if [ -f "$SERVICE_FILE" ]; then

@@ -1,5 +1,5 @@
 ---
-name: feishu-notifier
+name: feishu-relay
 description: Send Feishu (Lark) notifications via OpenClaw. Core only: send messages, queue, retry. No system modifications by default.
 ---
 

@@ -9,7 +9,7 @@ These capabilities are **NOT** installed by default. They require explicit opt-i
 **Risk**: Medium - Creates a system-wide executable
 
 ### What it does
-Creates `/usr/local/bin/notify` that wraps the feishu-notifier.
+Creates `/usr/local/bin/notify` that wraps the feishu-relay.
 
 ### Installation
 
@@ -80,8 +80,8 @@ Installs a systemd user service for daemon mode.
 ### Usage
 
 ```bash
-systemctl --user start feishu-notifier
-systemctl --user status feishu-notifier
+systemctl --user start feishu-relay
+systemctl --user status feishu-relay
 ```
 
 ---

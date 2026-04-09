@@ -1,11 +1,11 @@
 {
-  "name": "feishu-notifier",
+  "name": "feishu-relay",
   "version": "3.0.0",
   "description": "Minimal Feishu (Lark) notification bridge. Core only: send messages, queue, retry. No system modifications by default. Safe mode.",
   "author": "crayfish-ai",
   "license": "MIT",
-  "homepage": "https://github.com/crayfish-ai/feishu-notifier",
-  "issues": "https://github.com/crayfish-ai/feishu-notifier/issues",
+  "homepage": "https://github.com/crayfish-ai/feishu-relay",
+  "issues": "https://github.com/crayfish-ai/feishu-relay/issues",
   "entry": "run.sh",
   "config": {
     "appId": {

@@ -81,7 +81,7 @@ chmod 600 config.json
 | Risk | Mitigation |
 |------|------------|
 | Persistence across reboots | User-level service (not system) |
-| Logs in journal | `journalctl --user -u feishu-notifier` |
+| Logs in journal | `journalctl --user -u feishu-relay` |
 | Startup failures | Check status after install |
 
 ---
@@ -122,4 +122,4 @@ This skill is designed to:
 
 ## Questions?
 
-Open an issue at: https://github.com/crayfish-ai/feishu-notifier/issues
+Open an issue at: https://github.com/crayfish-ai/feishu-relay/issues

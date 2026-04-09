@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 ### Changed File Structure
 
 ```
-feishu-notifier/
+feishu-relay/
 ├── SKILL.md           # NEW: Minimal skill description
 ├── README.md          # REVISED: Core + opt-in separation
 ├── skill.json         # REVISED: New version 3.0.0

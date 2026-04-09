@@ -34,11 +34,11 @@ These capabilities are available as **optional add-ons** (see Advanced section).
 
 ```bash
 # Via ClawHub (recommended)
-openclaw skill install feishu-notifier
+openclaw skill install feishu-relay
 
 # Or manual
-git clone https://github.com/crayfish-ai/feishu-notifier.git
-cd feishu-notifier
+git clone https://github.com/crayfish-ai/feishu-relay.git
+cd feishu-relay
 ```
 
 ## Configuration
@@ -130,7 +130,7 @@ For system-level integrations, see [docs/advanced.md](docs/advanced.md):
 ## Directory Structure
 
 ```
-feishu-notifier/
+feishu-relay/
 ├── SKILL.md           # Minimal skill description
 ├── README.md          # This file
 ├── skill.json         # Skill metadata

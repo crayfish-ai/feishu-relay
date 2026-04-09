@@ -32,7 +32,7 @@ fi
 ACTION=""
 DRY_RUN=false
 CRON_EXPR=""
-CRON_COMMENT="# feishu-notifier"
+CRON_COMMENT="# feishu-relay"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -61,7 +61,7 @@ do_install() {
     
     # Check if already installed
     if crontab -l 2>/dev/null | grep -q "$CRON_COMMENT"; then
-        echo "Warning: feishu-notifier crontab entry already exists"
+        echo "Warning: feishu-relay crontab entry already exists"
         echo "Run --uninstall first to remove existing entry"
         exit 1
     fi
@@ -84,7 +84,7 @@ do_install() {
 }
 
 do_uninstall() {
-    echo "Removing feishu-notifier crontab entries..."
+    echo "Removing feishu-relay crontab entries..."
     
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY RUN] Would remove entries containing: $CRON_COMMENT"

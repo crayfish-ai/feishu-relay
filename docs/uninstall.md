@@ -1,6 +1,6 @@
 # Uninstallation Guide
 
-Complete removal of feishu-notifier and all optional components.
+Complete removal of feishu-relay and all optional components.
 
 ---
 
@@ -10,13 +10,13 @@ If you only installed the core skill:
 
 ```bash
 # Remove skill directory
-rm -rf ~/.openclaw/skills/feishu-notifier
+rm -rf ~/.openclaw/skills/feishu-relay
 
 # Remove config (if any)
-rm -f ~/.openclaw/skills/feishu-notifier/config.json
+rm -f ~/.openclaw/skills/feishu-relay/config.json
 
 # Remove logs (if any)
-rm -rf ~/.openclaw/skills/feishu-notifier/logs
+rm -rf ~/.openclaw/skills/feishu-relay/logs
 ```
 
 ---
@@ -53,13 +53,13 @@ crontab -l | grep -v feishu | crontab -
 
 ```bash
 # Stop service
-systemctl --user stop feishu-notifier 2>/dev/null
+systemctl --user stop feishu-relay 2>/dev/null
 
 # Disable service
-systemctl --user disable feishu-notifier 2>/dev/null
+systemctl --user disable feishu-relay 2>/dev/null
 
 # Remove service file
-rm -f ~/.config/systemd/user/feishu-notifier.service
+rm -f ~/.config/systemd/user/feishu-relay.service
 
 # Reload systemd
 systemctl --user daemon-reload
@@ -74,7 +74,7 @@ systemctl --user daemon-reload
 ### Step 5: Remove Core Skill
 
 ```bash
-rm -rf ~/.openclaw/skills/feishu-notifier
+rm -rf ~/.openclaw/skills/feishu-relay
 ```
 
 ### Step 6: Clean Environment Variables
@@ -104,7 +104,7 @@ After uninstallation, verify:
 
 ```bash
 # No skill directory
-ls ~/.openclaw/skills/feishu-notifier 2>/dev/null && echo "FAIL: Still exists" || echo "OK: Removed"
+ls ~/.openclaw/skills/feishu-relay 2>/dev/null && echo "FAIL: Still exists" || echo "OK: Removed"
 
 # No global notify
 which notify 2>/dev/null && echo "FAIL: Still exists" || echo "OK: Removed"
@@ -127,10 +127,10 @@ After complete removal, you can reinstall:
 
 ```bash
 # Core only (recommended)
-openclaw skill install feishu-notifier
+openclaw skill install feishu-relay
 
 # With advanced capabilities
-openclaw skill install feishu-notifier --with-advanced
+openclaw skill install feishu-relay --with-advanced
 ```
 
 ---
@@ -162,4 +162,4 @@ The service may not have been installed. Skip that step.
 
 ## Need Help?
 
-Open an issue: https://github.com/crayfish-ai/feishu-notifier/issues
+Open an issue: https://github.com/crayfish-ai/feishu-relay/issues

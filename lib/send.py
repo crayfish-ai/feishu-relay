@@ -79,8 +79,8 @@ class FeishuConfig:
     def _load_skill_config(self):
         """Load from OpenClaw skill config file if exists"""
         config_paths = [
-            os.path.expanduser("~/.openclaw/skills/feishu-notifier/config.json"),
-            "/etc/openclaw/skills/feishu-notifier/config.json",
+            os.path.expanduser("~/.openclaw/skills/feishu-relay/config.json"),
+            "/etc/openclaw/skills/feishu-relay/config.json",
             "./config.json"
         ]
         
