@@ -267,7 +267,7 @@ class FeishuNotifier:
         payload = json.dumps({
             "receive_id": target_id,
             "msg_type": "interactive",
-            "content": json.dumps({"card": message_card})
+            "content": json.dumps(message_card)
         }).encode('utf-8')
         
         headers = {
