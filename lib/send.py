@@ -78,11 +78,23 @@ class FeishuConfig:
     
     def _load_skill_config(self):
         """Load from OpenClaw skill config file if exists"""
+        # Determine skill directory
+        skill_dir = os.environ.get("FEISHU_SKILL_DIR", "")
+        
         config_paths = [
+            # Environment variable (set by run.sh)
+            os.path.join(skill_dir, "config.json") if skill_dir else None,
+            # OpenClaw standard locations
             os.path.expanduser("~/.openclaw/skills/feishu-relay/config.json"),
             "/etc/openclaw/skills/feishu-relay/config.json",
-            "./config.json"
+            # Fallback: relative to current working directory
+            "./config.json",
+            # Legacy: .env file in skill directory
+            os.path.join(skill_dir, ".env") if skill_dir else None,
         ]
+        
+        # Filter out None values
+        config_paths = [p for p in config_paths if p]
         
         for config_path in config_paths:
             if os.path.exists(config_path):

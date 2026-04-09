@@ -11,6 +11,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
 
+# 设置 skill 目录环境变量（用于配置查找）
+export FEISHU_SKILL_DIR="${SCRIPT_DIR}"
+
 # 检查 Python 是否可用
 if ! command -v python3 &> /dev/null; then
     echo '{"success":false,"error":"PYTHON_NOT_FOUND","message":"Python 3 is required but not installed"}' >&2
