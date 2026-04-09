@@ -1,6 +1,6 @@
 {
   "name": "feishu-relay",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Minimal Feishu (Lark) notification bridge. Core only: send messages, queue, retry. No system modifications by default. Safe mode.",
   "author": "crayfish-ai",
   "license": "MIT",

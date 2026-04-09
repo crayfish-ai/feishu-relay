@@ -6,6 +6,23 @@
 
 set -e
 
+# 系统总开关检查
+PAUSE_FLAG="/tmp/system_pause.flag"
+NOTIFY_PAUSE_LOG="/tmp/.evolution_pause.lock"
+
+if [ -f "$PAUSE_FLAG" ]; then
+    if [ ! -f "$NOTIFY_PAUSE_LOG" ]; then
+        notify -t "⏸️ 系统自进化已暂停" -m "self-evolution 已暂停，跳过执行。\n恢复：rm -f $PAUSE_FLAG" 2>/dev/null || true
+        touch "$NOTIFY_PAUSE_LOG"
+    fi
+    exit 0
+fi
+
+if [ -f "$NOTIFY_PAUSE_LOG" ]; then
+    notify -t "▶️ 系统自进化已恢复" -m "self-evolution 已恢复运行。" 2>/dev/null || true
+    rm -f "$NOTIFY_PAUSE_LOG"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 EVOLUTION_DIR="/root/.openclaw/workspace/evolution"

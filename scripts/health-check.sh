@@ -6,6 +6,12 @@
 
 set -e
 
+# 系统总开关检查
+PAUSE_FLAG="/tmp/system_pause.flag"
+if [ -f "$PAUSE_FLAG" ]; then
+    exit 0
+fi
+
 LOG_DIR="/tmp/openclaw-health"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/health-$(date +%Y%m%d).log"
