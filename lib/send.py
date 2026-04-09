@@ -314,6 +314,7 @@ Examples:
     parser.add_argument("--config", action="store_true", help="Show current config (masked)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
+    parser.add_argument("--health", action="store_true", help="Health check (for watchdog)")
     
     args = parser.parse_args()
     
@@ -349,6 +350,18 @@ Examples:
     # Send message
     try:
         notifier = FeishuNotifier(config)
+        
+        if args.health:
+            # Health check for watchdog
+            hostname = os.uname().nodename
+            result = {
+                "success": True,
+                "status": "healthy",
+                "hostname": hostname,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            sys.exit(0)
         
         if args.test:
             hostname = os.uname().nodename

@@ -42,7 +42,7 @@
   },
   "capabilities": {
     "core": ["send_message", "json_output", "retry"],
-    "opt_in": ["global_notify_link", "crontab", "systemd", "auto_discovery"]
+    "opt_in": ["global_notify_link", "crontab", "systemd", "watchdog", "auto_discovery"]
   },
   "safety": {
     "no_system_modification": true,
@@ -54,6 +54,7 @@
     "readme": "README.md",
     "skill": "SKILL.md",
     "advanced": "docs/advanced.md",
+    "production": "docs/production.md",
     "security": "docs/security.md",
     "uninstall": "docs/uninstall.md"
   }

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.1] - 2026-04-09
+
+### Added
+
+- **docs/production.md**: Production deployment guide with recommended architecture
+- **scripts/install-watchdog.sh**: Health monitoring for 24/7 servers
+- `--health` CLI option for watchdog health checks
+
+### Changed
+
+- README: Clear distinction between default mode and production mode
+- skill.json: Added `watchdog` to opt_in capabilities
+
+### Fixed
+
+- Consistent naming: All references changed from `feishu-notifier` to `feishu-relay`
+
+---
+
 ## [3.0.0] - 2026-04-09
 
 ### Changed

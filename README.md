@@ -1,167 +1,162 @@
-# Feishu Notifier v3.0
+# Feishu Relay
 
-**Safe Mode: Minimal by default, ops opt-in**
+**Safe Mode: Minimal by default, production capabilities opt-in**
 
-A Feishu (Lark) notification bridge designed for safety and transparency.
-
----
-
-## Core Features
-
-| Feature | Description |
-|---------|-------------|
-| **Message Send** | Send notifications via Feishu Open API |
-| **JSON Output** | Structured output for program parsing |
-| **Retry Logic** | Automatic retry on network failure |
-| **Config Flexibility** | Environment variables or skill config |
-
-## What This Skill Does NOT Do
-
-By default, this skill does **NOT**:
-
-- ❌ Install systemd services
-- ❌ Modify crontab
-- ❌ Create global `/usr/local/bin/notify` link
-- ❌ Auto-discover other skills
-- ❌ Inject environment variables
-- ❌ Require root access for basic use
-
-These capabilities are available as **optional add-ons** (see Advanced section).
+A Feishu (Lark) notification bridge for OpenClaw.
 
 ---
 
-## Installation
+## Two Modes
+
+### Default Mode (ClawHub Install)
+
+Safe, minimal, no system modifications.
 
 ```bash
-# Via ClawHub (recommended)
 openclaw skill install feishu-relay
-
-# Or manual
-git clone https://github.com/crayfish-ai/feishu-relay.git
-cd feishu-relay
 ```
+
+**What you get:**
+- ✅ Send messages via `./run.sh`
+- ✅ JSON structured output
+- ✅ Retry on failure
+- ✅ No system modifications
+- ✅ No root required
+
+**Best for:** Personal computers, shared hosting, testing, ClawHub distribution.
+
+---
+
+### Production Mode (Self-Hosted Server)
+
+For your own Linux server with 24/7 uptime requirements.
+
+```bash
+# After base install, enable production capabilities:
+./scripts/install-systemd.sh --install --user      # 24/7 daemon
+./scripts/install-watchdog.sh --install           # Health monitoring
+sudo ./scripts/install-global-notify.sh --install  # /usr/local/bin/notify
+```
+
+**What you get (in addition to defaults):**
+- 🔧 Systemd service with auto-restart
+- 🔧 Watchdog health monitoring
+- 🔧 Global `/usr/local/bin/notify` command
+
+**Best for:** Your own server, 24/7 operations, production workloads.
+
+See [docs/production.md](docs/production.md) for full production deployment guide.
+
+---
+
+## Quick Start
+
+### 1. Install
+
+```bash
+openclaw skill install feishu-relay
+```
+
+### 2. Configure
+
+```bash
+export FEISHU_APP_ID="cli_xxxxxxxx"
+export FEISHU_APP_SECRET="xxxxxxxx"
+export FEISHU_RECEIVE_ID="ou_xxxxxxxx"
+```
+
+Or create `config.json`:
+
+```json
+{
+  "appId": "cli_xxxxxxxx",
+  "appSecret": "xxxxxxxx",
+  "receiveId": "ou_xxxxxxxx"
+}
+```
+
+### 3. Test
+
+```bash
+./run.sh -t "Test" -m "Hello from feishu-relay"
+```
+
+---
+
+## Usage
+
+```bash
+# Basic message
+./run.sh -t "Title" -m "Message"
+
+# JSON output (for scripting)
+./run.sh -t "Title" -m "Message" --json
+
+# With receive ID override
+./run.sh -t "Title" -m "Message" --receive-id ou_xxxx --receive-id-type open_id
+```
+
+---
 
 ## Configuration
 
-### Environment Variables
+| Option | Env Variable | Required | Default |
+|--------|-------------|----------|---------|
+| App ID | `FEISHU_APP_ID` | Yes | - |
+| App Secret | `FEISHU_APP_SECRET` | Yes | - |
+| Receive ID | `FEISHU_RECEIVE_ID` | Yes | - |
+| ID Type | `FEISHU_RECEIVE_ID_TYPE` | No | `open_id` |
 
-```bash
-export FEISHU_APP_ID="cli_xxxxxxxxxx"
-export FEISHU_APP_SECRET="xxxxxxxxxxxxxxxxxxxxxxxx"
-export FEISHU_RECEIVE_ID="ou_xxxxxxxxxxxxxxxx"
-export FEISHU_RECEIVE_ID_TYPE="open_id"  # optional: open_id, user_id, chat_id, email
-```
-
-### Or Skill Config
-
-Create `config.json` in the skill directory:
-
-```json
-{
-  "appId": "cli_xxx",
-  "appSecret": "xxx",
-  "receiveId": "ou_xxx",
-  "receiveIdType": "open_id"
-}
-```
-
-**Security**: Run `chmod 600 config.json` to protect credentials.
+ID types: `open_id`, `user_id`, `chat_id`, `email`
 
 ---
 
-## Basic Usage
-
-```bash
-# Send notification
-./run.sh -t "Title" -m "Message body"
-
-# With JSON output
-./run.sh -t "Title" -m "Message" --json
-
-# Test connection
-./run.sh --test
-
-# Check config
-./run.sh --config
-```
-
----
-
-## Output Format
-
-### Success
-
-```json
-{
-  "success": true,
-  "message_id": "om_xxxxxxxxxxxx",
-  "create_time": "1234567890000"
-}
-```
-
-### Error
-
-```json
-{
-  "success": false,
-  "error": "API_ERROR",
-  "message": "Failed to send",
-  "code": 99991663
-}
-```
-
----
-
-## Advanced Capabilities (Opt-in)
-
-For system-level integrations, see [docs/advanced.md](docs/advanced.md):
-
-| Capability | Description | Risk |
-|------------|-------------|------|
-| Global notify link | Link to `/usr/local/bin/notify` | Medium |
-| Crontab integration | Schedule notifications | Low |
-| Systemd service | Persistent daemon | Medium |
-| Auto-discovery | Find other skills' notify scripts | Low |
-
-**All advanced features require explicit opt-in via flags or separate installation scripts.**
-
----
-
-## Directory Structure
+## Project Structure
 
 ```
 feishu-relay/
-├── SKILL.md           # Minimal skill description
-├── README.md          # This file
-├── skill.json         # Skill metadata
-├── run.sh             # Core entry point
-├── lib/
-│   └── send.py        # Python notification module
+├── run.sh                 # Main entry point
+├── notify                 # CLI wrapper
+├── lib/send.py            # Core sending logic
+├── config.json.example    # Config example
+├── scripts/
+│   ├── install-systemd.sh       # Production: systemd service
+│   ├── install-watchdog.sh      # Production: health monitoring
+│   ├── install-global-notify.sh # Production: global command
+│   ├── install-crontab.sh       # Production: cron jobs
+│   └── install-discovery.sh     # Scan for other skills
 ├── docs/
-│   ├── advanced.md     # Advanced capabilities (opt-in)
-│   ├── security.md     # Security considerations
-│   └── uninstall.md    # Clean removal guide
-└── LICENSE
+│   ├── advanced.md        # Opt-in capabilities
+│   ├── production.md       # Production deployment guide
+│   ├── security.md         # Security considerations
+│   └── uninstall.md        # Removal guide
+└── SKILL.md               # OpenClaw skill metadata
 ```
 
 ---
 
-## Security
+## Safety
 
-See [docs/security.md](docs/security.md) for:
-
-- Permission boundaries
-- Credential storage recommendations
-- Production installation risks
+- **No system modifications by default**
+- **No root required for basic use**
+- **No auto-migration**
+- **Production capabilities are opt-in only**
 
 ---
 
-## Uninstallation
+## Documentation
 
-See [docs/uninstall.md](docs/uninstall.md) for complete removal instructions.
+| Doc | What |
+|-----|------|
+| [SKILL.md](SKILL.md) | Quick reference |
+| [README.md](README.md) | This file |
+| [docs/advanced.md](docs/advanced.md) | Opt-in capabilities |
+| [docs/production.md](docs/production.md) | Production deployment |
+| [docs/security.md](docs/security.md) | Security guide |
+| [docs/uninstall.md](docs/uninstall.md) | Complete removal |
 
 ---
 
 ## License
 
-MIT - See LICENSE file
+MIT-0
