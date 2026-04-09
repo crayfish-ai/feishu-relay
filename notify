@@ -1,7 +1,7 @@
 #!/bin/bash
 # feishu-relay notification wrapper
 # Usage: ./notify "Title" "Message"
+# Or from anywhere: /usr/local/bin/notify "Title" "Message"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-./run.sh -t "${1:-通知}" -m "${2:-}"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/run.sh" "$@"
