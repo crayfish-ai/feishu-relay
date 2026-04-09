@@ -1,5 +1,7 @@
 #!/bin/bash
-# feishu-notifier 的通知脚本（自动生成）
-# 发送通知到 feishu-relay
+# feishu-relay notification wrapper
+# Usage: ./notify "Title" "Message"
 
-/opt/feishu-notifier/bin/notify "[feishu-notifier] ${1:-通知}" "${2:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+./run.sh -t "${1:-通知}" -m "${2:-}"
