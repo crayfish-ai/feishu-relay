@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-04-10
+
+### Added
+
+- **System Pause Mechanism**: Global pause flag support for all scripts
+- **Auto-load Config**: Automatic config.json loading from skill directory
+- **Health-check Integration**: health-check.sh integrated with system pause
+
+### Changed
+
+- **notify wrapper**: Fixed absolute path resolution for system-level calls
+- **run.sh**: Now sets FEISHU_SKILL_DIR for config discovery
+- **self-evolution.sh**: Enhanced with pause/resume notifications
+
+### Fixed
+
+- **notify path issue**: `/usr/local/bin/notify` now works correctly via symlink
+- **config loading**: Config auto-loads from skill directory when called from any path
+
+### Security
+
+- Default mode remains minimal permissions (opt-in for production features)
+- Production mode capabilities remain opt-in
+
+---
+
 ## [3.0.1] - 2026-04-09
 
 ### Added
@@ -46,22 +72,6 @@ All notable changes to this project will be documented in this file.
 - `docs/uninstall.md`: Complete removal guide
 - `SKILL.md`: Minimal skill description
 - `CHANGELOG.md`: Version history
-
-### Changed File Structure
-
-```
-feishu-relay/
-├── SKILL.md           # NEW: Minimal skill description
-├── README.md          # REVISED: Core + opt-in separation
-├── skill.json         # REVISED: New version 3.0.0
-├── lib/
-│   └── send.py        # Core notification logic (unchanged)
-├── docs/              # NEW directory
-│   ├── advanced.md     # NEW: Opt-in capabilities
-│   ├── security.md     # NEW: Security guide
-│   └── uninstall.md    # NEW: Removal guide
-└── scripts/           # Opt-in installers (existing advanced)
-```
 
 ### Version History
 
