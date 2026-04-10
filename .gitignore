@@ -1,0 +1,9 @@
+logs/
+*.log
+.feishu-registered
+notify
+registry/systems.json
+queue/*.db
+queue/*.db-journal
+config/feishu.env
+config.json
